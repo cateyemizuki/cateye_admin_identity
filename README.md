@@ -13,6 +13,8 @@
 - **管理员提示词注入**：同时把一条可配置的提示词插入到**紧随头部系统提示词之后**的位置
   （紧邻宿主 system 指令区、位于全部真实消息之前），明确告诉 bot：**只有带名单内
   QQ 号标注的消息才来自管理员**，自称或名字相像都不算。
+- **生效范围可选**：默认私聊 + 群聊都生效，也可以设为**仅群聊**——私聊里完全不改写
+  上下文、不注入提示词（不泄露名单、不浪费 token）。
 
 ## 功能
 
@@ -66,9 +68,28 @@ item_id 不变，不影响工具调用/结果的配对。只影响**本次临时
 - 条件注入：`require_admin_in_context`（默认关）开启后，仅当本次上下文**按 QQ 号**
   出现管理员消息时才注入，省 token（冒名者不会触发）。
 
-### 3. 独立开关
+### 3. 生效范围：私聊 + 群聊 / 仅群聊
+
+`[scope].mode` 决定插件在哪些会话里生效：
+
+| 取值 | 含义 |
+| --- | --- |
+| `all`（默认） | 私聊与群聊都生效，与旧版行为一致 |
+| `group_only` | **仅群聊生效**：私聊完全不动——不标注、不清洗、不注入提示词 |
+
+会话类型（群聊 / 私聊）从入站消息的 `message_info.group_info` 读出，按 `session_id`
+记录在内存里（会话类型不会变化，只保留最近 4096 个会话），Planner / Replyer 请求前
+按 `session_id` 判定，因此**不需要额外查询、不增加请求耗时**。
+
+> 局限（与「宁可漏标」原则一致）：插件刚启动/重载后，若某个会话还没有新消息流入，
+> 插件还不知道它是群聊还是私聊。此时 `group_only` 按**不生效**处理——宁可漏注入，
+> 也绝不误改私聊上下文。该会话来一条消息后即自动补齐（宿主每条入站消息都会触发
+> 记录，包括 bot 不回复的消息）。用 `管理员标注` 命令可以查看当前会话的类型与是否生效。
+
+### 4. 独立开关
 
 - 总开关 `[plugin].enabled`；
+- 生效范围 `[scope].mode`（`all` / `group_only`）；
 - 标注开关 `[annotate].annotate_qq`（关闭后不再改写显示名，但反伪造清洗仍然生效，
   且注入提示词仍会列出名单）；
 - 注入开关 `[inject].inject_into_planner` / `inject_into_replyer`；
@@ -81,7 +102,11 @@ item_id 不变，不影响工具调用/结果的配对。只影响**本次临时
 ```toml
 [plugin]
 enabled = true
-config_version = "1.0.2"
+config_version = "1.1.0"
+
+[scope]
+# all = 私聊与群聊都生效；group_only = 仅群聊生效（私聊完全不动）
+mode = "all"
 
 [admins]
 # 每行一个管理员：纯 QQ 号 / qq:QQ号 / 昵称:QQ号 / 昵称(QQ号) 皆可
@@ -110,7 +135,10 @@ prompt_template = """【系统设定·管理员身份（本条为系统内部设
 
 ## 工作原理（开发者）
 
-- Hook `chat.receive.before_process`（BLOCKING/EARLY）→ 记录 `message_id → user_id(QQ)`；
+- Hook `chat.receive.before_process`（BLOCKING/EARLY）→ 记录 `message_id → user_id(QQ)`
+  与 `session_id → is_group`（会话类型，供生效范围判定）；
+- 生效范围：Planner / Replyer 请求前先按 `session_id` 查会话类型，不在 `[scope].mode`
+  范围内（`group_only` 且非群聊 / 类型未知）直接原样放行；
 - Hook `maisaka.planner.before_request`（BLOCKING/LATE，`allow_kwargs_mutation`）→
   逐条 UserMessageItem 解析前缀 → `msg_id` 反查发送者 **QQ 号** → 命中名单则标注、
   未命中且携带伪标注则清洗 → 紧随头部系统提示词插入注入条目 → 返回
@@ -124,7 +152,7 @@ prompt_template = """【系统设定·管理员身份（本条为系统内部设
 ## 状态命令
 
 - 群/私聊内输入 `管理员标注`（或 `/admin_identity`）查看当前状态：
-  名单、标注开关、注入位置与角色。
+  生效范围、当前会话类型与是否生效、名单、标注开关、注入位置与角色。
 
 ## License
 

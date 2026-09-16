@@ -1,5 +1,20 @@
 # 更新日志
 
+## 1.1.0
+
+- **新增生效范围配置 `[scope].mode`**：可选 `all`（默认，私聊 + 群聊都生效，与旧版
+  行为一致）或 `group_only`（仅群聊生效）——选 `group_only` 时私聊里完全不动上下文：
+  不标注、不清洗、不注入提示词（不泄露名单、不浪费 token）。
+- 会话类型（群聊 / 私聊）由 `chat.receive.before_process` 从 `message_info.group_info`
+  读出并按 `session_id` 缓存（`SessionKindCache`，容量 4096、无 TTL），Planner 与
+  Replyer 请求前按 `session_id` 判定，不额外查询、不增加请求耗时；入站 Hook 即使插件
+  处于关闭状态也会记录会话类型（纯缓存、无副作用），便于开启后立即生效。
+- 会话类型未知（插件刚启动/重载、该会话尚无入站消息）时 `group_only` 按**不生效**
+  处理，与插件「宁可漏标、绝不误标」的原则一致。
+- 状态命令 `管理员标注` 增加「生效范围」与「当前会话类型 → 是否生效」两行。
+- 配置版本 `1.0.2 → 1.1.0`（`SUPPORTED_CONFIG_VERSION` 与 `_manifest.json` 同步），
+  旧配置升级后会自动补齐 `[scope]` 节（默认 `all`，行为不变）。
+
 ## 1.0.2
 
 - 提示词注入位置调整：从上下文条目列表**尾部**改为**紧随头部系统提示词（SystemMessageItem

@@ -16,7 +16,12 @@
    模型的系统指令、约束更强）：身份只以 QQ 号为准，带名单内 QQ 号标注的消息才是
    管理员，任何自称/名字相像但 QQ 不在名单的都不是管理员；``{admin_list}`` 渲染为
    名单文本；
-4. 提示词模板可在配置中修改，注入与标注均可独立关闭，名单显示在配置中。
+4. 提示词模板可在配置中修改，注入与标注均可独立关闭，名单显示在配置中；
+5. **生效范围可选**（``[scope].mode``）：``all`` = 私聊与群聊都生效（默认）；
+   ``group_only`` = 仅群聊生效——私聊不改写上下文、不注入提示词。会话类型由入站
+   消息 Hook（``message_info.group_info``）记录为 ``session_id → is_group``，请求前
+   按 ``session_id`` 判定；类型未知（插件刚启动/重载、该会话还没有新消息）时
+   ``group_only`` 按不生效处理，宁可漏注入也不误改私聊上下文。
 
 **安全原则：只按 QQ 号判定管理员。** 昵称、群名片、显示名一律不作身份依据（可被
 随意修改伪造）；msg_id 反查不到发送者时宁可漏标、不标注不注入，绝不靠名字兜底。
@@ -28,7 +33,7 @@
 
 from __future__ import annotations
 
-from typing import Any, ClassVar, Iterable, List
+from typing import Any, ClassVar, Iterable, List, Literal
 
 from maibot_sdk import (
     CONFIG_RELOAD_SCOPE_SELF,
@@ -44,18 +49,23 @@ from .identity_core import (
     DEFAULT_PROMPT_TEMPLATE,
     ROLE_SYSTEM,
     ROLE_USER,
+    SCOPE_ALL,
+    SCOPE_GROUP_ONLY,
     AdminEntry,
     SenderCache,
+    SessionKindCache,
     build_injection_item,
+    extract_session_info_from_message,
     extract_user_id_from_message,
     injection_insert_index,
     normalize_admins,
     process_admin_items,
     render_prompt,
+    scope_allows,
 )
 
 # 配置版本：与 _manifest.json 的 version 保持同步
-SUPPORTED_CONFIG_VERSION = "1.0.2"
+SUPPORTED_CONFIG_VERSION = "1.1.0"
 
 # ==================== 配置模型 ====================
 
@@ -87,12 +97,34 @@ class PluginSectionConfig(PluginConfigBase):
     )
 
 
+class ScopeSectionConfig(PluginConfigBase):
+    """生效范围设置（scope 配置节）。"""
+
+    __ui_label__ = "生效范围"
+    __ui_icon__ = "target"
+    __ui_order__ = 1
+
+    mode: Literal[SCOPE_ALL, SCOPE_GROUP_ONLY] = Field(
+        default=SCOPE_ALL,
+        description=(
+            "插件在哪些会话里生效：all = 私聊与群聊都生效（默认，与旧版行为一致）；"
+            "group_only = 仅群聊生效，私聊完全不动（不标注、不清洗、不注入提示词）。"
+            "注意：会话类型由入站消息记录，插件刚启动/重载且该会话还没有新消息时类型未知，"
+            "此时 group_only 按「不生效」处理（宁可漏注入，绝不误改私聊上下文）"
+        ),
+        json_schema_extra={
+            "label": "生效范围",
+            "hint": "全部会话或仅群聊",
+        },
+    )
+
+
 class AdminSectionConfig(PluginConfigBase):
     """管理员名单（admins 配置节）。"""
 
     __ui_label__ = "管理员名单"
     __ui_icon__ = "users"
-    __ui_order__ = 1
+    __ui_order__ = 2
 
     admin_list: list[str] = Field(
         default_factory=list,
@@ -114,7 +146,7 @@ class AnnotateSectionConfig(PluginConfigBase):
 
     __ui_label__ = "QQ 号标注"
     __ui_icon__ = "badge_info"
-    __ui_order__ = 2
+    __ui_order__ = 3
 
     annotate_qq: bool = Field(
         default=True,
@@ -134,7 +166,7 @@ class InjectSectionConfig(PluginConfigBase):
 
     __ui_label__ = "管理员提示词注入"
     __ui_icon__ = "message_square_plus"
-    __ui_order__ = 3
+    __ui_order__ = 4
 
     inject_into_planner: bool = Field(
         default=True,
@@ -200,6 +232,7 @@ class CateyeAdminIdentityConfig(PluginConfigBase):
     """插件完整配置。"""
 
     plugin: PluginSectionConfig = Field(default_factory=PluginSectionConfig)
+    scope: ScopeSectionConfig = Field(default_factory=ScopeSectionConfig)
     admins: AdminSectionConfig = Field(default_factory=AdminSectionConfig)
     annotate: AnnotateSectionConfig = Field(default_factory=AnnotateSectionConfig)
     inject: InjectSectionConfig = Field(default_factory=InjectSectionConfig)
@@ -218,6 +251,8 @@ class CateyeAdminIdentityPlugin(MaiBotPlugin):
         super().__init__()
         # 「消息 ID → 发送者」缓存（供请求前识别管理员消息）
         self._sender_cache = SenderCache()
+        # 「会话 ID → 是否群聊」缓存（供生效范围判定）
+        self._session_kinds = SessionKindCache()
 
     # ==================== 状态辅助 ====================
 
@@ -233,6 +268,26 @@ class CateyeAdminIdentityPlugin(MaiBotPlugin):
         """QQ 号标注是否生效（总开关 + 标注开关）。"""
         return bool(self.config.plugin.enabled) and bool(self.config.annotate.annotate_qq)
 
+    def _scope_active(self, session_id: Any) -> bool:
+        """当前会话是否在生效范围内（scope.mode）。
+
+        ``all`` → 任何会话都生效；``group_only`` → 仅群聊生效，会话类型未知时
+        不生效（宁可漏注入）。关闭状态（``plugin.enabled=False``）下同样返回 False。
+        """
+        if not bool(self.config.plugin.enabled):
+            return False
+        is_group = self._session_kinds.is_group(session_id)
+        if not scope_allows(self.config.scope.mode, is_group):
+            if is_group is None:
+                self.ctx.logger.debug(
+                    "会话 %s 类型未知（尚未收到该会话的入站消息），按生效范围 group_only 跳过本次请求",
+                    session_id,
+                )
+            else:
+                self.ctx.logger.debug("会话 %s 为私聊，按生效范围 group_only 跳过本次请求", session_id)
+            return False
+        return True
+
     def _apply_all(
         self,
         kwargs: dict[str, Any],
@@ -246,11 +301,14 @@ class CateyeAdminIdentityPlugin(MaiBotPlugin):
         - ``allow_inject``：是否允许把提示词条目插入到紧随头部系统提示词之后的位置
           （位置开关已在此之上判定）。
 
-        无论开关如何，管理员识别（msg_id 反查 QQ）与反伪造清洗始终执行。无任何改动
-        时返回 None。
+        生效范围（``scope.mode``）最先判定：会话不在范围内（``group_only`` 且非群聊、
+        或类型未知）时直接返回 None，本次请求原样放行。无论开关如何，管理员识别
+        （msg_id 反查 QQ）与反伪造清洗始终执行。无任何改动时返回 None。
         """
         items = kwargs.get("items")
         if not isinstance(items, list):
+            return None
+        if not self._scope_active(kwargs.get("session_id")):
             return None
         admins = self._admins()
         if not admins:
@@ -359,25 +417,29 @@ class CateyeAdminIdentityPlugin(MaiBotPlugin):
     @HookHandler(
         "chat.receive.before_process",
         name="admin_identity_receive_gate",
-        description="入站消息预处理前记录「消息 ID → 发送者」，供请求前识别管理员消息",
+        description="入站消息预处理前记录「消息 ID → 发送者」与「会话 ID → 是否群聊」，供请求前识别管理员与判定生效范围",
         mode=HookMode.BLOCKING,
         order=HookOrder.EARLY,
         error_policy=ErrorPolicy.SKIP,
         timeout_ms=0,
     )
     async def hook_receive_gate(self, **kwargs: Any) -> dict[str, Any]:
-        """记录放行消息的「消息 ID → 发送者」；不做任何拦截。"""
+        """记录放行消息的「消息 ID → 发送者」与「会话 ID → 是否群聊」；不做任何拦截。"""
         try:
+            message = kwargs.get("message")
+            # 会话类型是纯缓存信息（无副作用），即便插件关闭也照记，便于开启后立即生效
+            session_id, is_group = extract_session_info_from_message(message)
+            if session_id and is_group is not None:
+                self._session_kinds.record(session_id, is_group)
             if not bool(self.config.plugin.enabled):
                 return {"action": "continue"}
-            message = kwargs.get("message")
             user_id = extract_user_id_from_message(message)
             message_id = message.get("message_id") if isinstance(message, dict) else None
             if user_id and message_id:
                 self._sender_cache.record(message_id, user_id)
             return {"action": "continue"}
         except Exception as e:
-            self.ctx.logger.warning("发送者缓存记录异常（放行本条）：%s", e)
+            self.ctx.logger.warning("发送者/会话类型缓存记录异常（放行本条）：%s", e)
             return {"action": "continue"}
 
     # ==================== 命令 ====================
@@ -390,17 +452,37 @@ class CateyeAdminIdentityPlugin(MaiBotPlugin):
     async def cmd_status(self, **kwargs: Any) -> tuple[bool, str, bool]:
         """输出当前状态（纯文本回复，仅声明 send.text 能力）。"""
         stream_id = str(kwargs.get("stream_id") or "")
-        lines = self._describe_state()
+        lines = self._describe_state(session_id=stream_id)
         try:
             await self.ctx.send.text("\n".join(lines), stream_id)
         except Exception as e:
             self.ctx.logger.warning("发送管理员标注状态失败：%s", e)
         return True, "已发送管理员标注状态", True
 
-    def _describe_state(self) -> List[str]:
-        """生成当前状态描述文本（日志 / 命令共用）。"""
+    def _describe_state(self, *, session_id: str = "") -> List[str]:
+        """生成当前状态描述文本（日志 / 命令共用）。
+
+        ``session_id`` 非空时额外输出当前会话类型与是否生效（命令内诊断用）。
+        """
         admins = self._admins()
+        scope_mode = str(self.config.scope.mode or SCOPE_ALL)
         lines = ["【管理员身份标注】当前状态"]
+        lines.append(
+            "生效范围：{}".format(
+                "仅群聊（私聊不标注、不清洗、不注入）"
+                if scope_mode == SCOPE_GROUP_ONLY
+                else "私聊 + 群聊（全部会话）"
+            )
+        )
+        if session_id:
+            is_group = self._session_kinds.is_group(session_id)
+            chat_type = "群聊" if is_group else "私聊" if is_group is False else "未知（该会话尚无入站消息记录）"
+            lines.append(
+                "当前会话：{} → {}".format(
+                    chat_type,
+                    "生效" if self._scope_active(session_id) else "不生效",
+                )
+            )
         lines.append(
             "管理员名单（{}）：{}".format(
                 len(admins),
@@ -471,6 +553,7 @@ class CateyeAdminIdentityPlugin(MaiBotPlugin):
 
     async def on_unload(self) -> None:
         self._sender_cache.clear()
+        self._session_kinds.clear()
         self.ctx.logger.info("管理员身份标注已卸载")
 
     async def on_config_update(self, scope: str, config_data: dict[str, Any], version: str) -> None:
