@@ -65,7 +65,7 @@ from .identity_core import (
 )
 
 # 配置版本：与 _manifest.json 的 version 保持同步
-SUPPORTED_CONFIG_VERSION = "1.1.0"
+SUPPORTED_CONFIG_VERSION = "1.1.1"
 
 # ==================== 配置模型 ====================
 
@@ -191,15 +191,15 @@ class InjectSectionConfig(PluginConfigBase):
         },
     )
     require_admin_in_context: bool = Field(
-        default=False,
+        default=True,
         description=(
-            "仅当本次上下文出现管理员消息时才注入（省 token）：开启后注入前先识别上下文"
-            "（msg_id 反查 QQ 命中名单），没有管理员消息则不注入。注意：插件启动前已在"
-            "上下文中的历史消息追踪不到，该部分不触发"
+            "仅当本次上下文出现管理员消息时才注入（默认开启，省 token）：注入前先识别上下文"
+            "（msg_id 反查 QQ 命中名单），没有管理员消息则不注入，冒名者不会触发；"
+            "关闭后每次都注入。注意：插件启动前已在上下文中的历史消息追踪不到，该部分不触发"
         ),
         json_schema_extra={
             "label": "仅上下文有管理员时才注入",
-            "hint": "有管理员消息才注入",
+            "hint": "默认开，省token",
         },
     )
     inject_role: str = Field(
