@@ -1,5 +1,15 @@
 # 更新日志
 
+## 1.1.2
+
+- **配置界面补全 WebUI 元数据与英文翻译（1.3.0 规范对齐）**：全部 11 个配置字段在
+  `json_schema_extra` 中补充 `i18n`（`en` 的 `label`/`hint`），5 个配置分组补充
+  `__ui_i18n__`（英文 `title`/`description`）——此前缺省时 WebUI 英文界面会直接显示
+  英文字段名。中文界面显示不变；字段名、默认值、功能与行为均无任何变化。
+- 配置版本 `1.1.1 → 1.1.2`（`SUPPORTED_CONFIG_VERSION` 与 `_manifest.json` 同步）。
+- 版本区间声明核对：`host_application 1.0.0 ~ 1.99.99`、`sdk 2.3.0 ~ 2.99.99`，
+  同时兼容 MaiBot 1.2.x 与 1.3.0（策略 A，main 单代码线）。
+
 ## 1.1.1
 
 - **`require_admin_in_context` 默认值改为 `true`**（原 `false`）：默认只在本次上下文

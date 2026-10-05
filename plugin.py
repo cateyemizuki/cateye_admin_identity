@@ -65,7 +65,19 @@ from .identity_core import (
 )
 
 # 配置版本：与 _manifest.json 的 version 保持同步
-SUPPORTED_CONFIG_VERSION = "1.1.1"
+SUPPORTED_CONFIG_VERSION = "1.1.2"
+
+
+def _ui_i18n(en_label: str, en_hint: str = "") -> dict:
+    """字段级英文翻译（并入 json_schema_extra；WebUI 按 i18n[locale]['label'/'hint'] 取用）。
+
+    键名固定为 ``en``（WebUI 界面语言键，非 ``en_US``）。
+    """
+    entry: dict = {"label": en_label}
+    if en_hint:
+        entry["hint"] = en_hint
+    return {"i18n": {"en": entry}}
+
 
 # ==================== 配置模型 ====================
 
@@ -76,6 +88,9 @@ class PluginSectionConfig(PluginConfigBase):
     __ui_label__ = "插件"
     __ui_icon__ = "shield_check"
     __ui_order__ = 0
+    __ui_i18n__: ClassVar[dict] = {
+        "en": {"title": "Plugin", "description": "Plugin master switch and config version."}
+    }
 
     enabled: bool = Field(
         default=True,
@@ -83,6 +98,7 @@ class PluginSectionConfig(PluginConfigBase):
         json_schema_extra={
             "label": "启用插件",
             "hint": "插件总开关",
+            **_ui_i18n("Enable plugin", "Master switch of the plugin."),
         },
     )
     config_version: str = Field(
@@ -93,6 +109,7 @@ class PluginSectionConfig(PluginConfigBase):
             "disabled": True,
             "label": "配置版本",
             "hint": "配置版本，勿改",
+            **_ui_i18n("Config version", "Synced with the plugin version; do not edit."),
         },
     )
 
@@ -103,6 +120,9 @@ class ScopeSectionConfig(PluginConfigBase):
     __ui_label__ = "生效范围"
     __ui_icon__ = "target"
     __ui_order__ = 1
+    __ui_i18n__: ClassVar[dict] = {
+        "en": {"title": "Scope", "description": "Which sessions the plugin applies to."}
+    }
 
     mode: Literal[SCOPE_ALL, SCOPE_GROUP_ONLY] = Field(
         default=SCOPE_ALL,
@@ -115,6 +135,7 @@ class ScopeSectionConfig(PluginConfigBase):
         json_schema_extra={
             "label": "生效范围",
             "hint": "全部会话或仅群聊",
+            **_ui_i18n("Scope", "All sessions or group chats only."),
         },
     )
 
@@ -125,6 +146,9 @@ class AdminSectionConfig(PluginConfigBase):
     __ui_label__ = "管理员名单"
     __ui_icon__ = "users"
     __ui_order__ = 2
+    __ui_i18n__: ClassVar[dict] = {
+        "en": {"title": "Admin list", "description": "Administrators, identified by QQ number only."}
+    }
 
     admin_list: list[str] = Field(
         default_factory=list,
@@ -137,6 +161,7 @@ class AdminSectionConfig(PluginConfigBase):
         json_schema_extra={
             "label": "管理员名单",
             "hint": "管理员名单，只认QQ号",
+            **_ui_i18n("Admin list", "One admin per line; matched by QQ number only."),
         },
     )
 
@@ -147,6 +172,9 @@ class AnnotateSectionConfig(PluginConfigBase):
     __ui_label__ = "QQ 号标注"
     __ui_icon__ = "badge_info"
     __ui_order__ = 3
+    __ui_i18n__: ClassVar[dict] = {
+        "en": {"title": "QQ annotation", "description": "Annotate admin messages with their QQ number."}
+    }
 
     annotate_qq: bool = Field(
         default=True,
@@ -157,6 +185,7 @@ class AnnotateSectionConfig(PluginConfigBase):
         json_schema_extra={
             "label": "QQ 号标注",
             "hint": "显示名加注QQ号",
+            **_ui_i18n("QQ annotation", "Append the QQ number to admin display names."),
         },
     )
 
@@ -167,6 +196,9 @@ class InjectSectionConfig(PluginConfigBase):
     __ui_label__ = "管理员提示词注入"
     __ui_icon__ = "message_square_plus"
     __ui_order__ = 4
+    __ui_i18n__: ClassVar[dict] = {
+        "en": {"title": "Prompt injection", "description": "Inject the admin prompt into model requests."}
+    }
 
     inject_into_planner: bool = Field(
         default=True,
@@ -177,6 +209,7 @@ class InjectSectionConfig(PluginConfigBase):
         json_schema_extra={
             "label": "注入 Planner",
             "hint": "注入到Planner",
+            **_ui_i18n("Inject into Planner", "Inject into Planner requests."),
         },
     )
     inject_into_replyer: bool = Field(
@@ -188,6 +221,7 @@ class InjectSectionConfig(PluginConfigBase):
         json_schema_extra={
             "label": "注入回复器",
             "hint": "注入到回复器",
+            **_ui_i18n("Inject into Replyer", "Inject into Replyer requests."),
         },
     )
     require_admin_in_context: bool = Field(
@@ -200,6 +234,10 @@ class InjectSectionConfig(PluginConfigBase):
         json_schema_extra={
             "label": "仅上下文有管理员时才注入",
             "hint": "默认开，省token",
+            **_ui_i18n(
+                "Inject only when an admin is in context",
+                "On by default; skips injection when no admin message is present, saving tokens.",
+            ),
         },
     )
     inject_role: str = Field(
@@ -212,6 +250,7 @@ class InjectSectionConfig(PluginConfigBase):
             "enum": [ROLE_USER, ROLE_SYSTEM],
             "label": "注入条目角色",
             "hint": "system或user",
+            **_ui_i18n("Injection entry role", "system or user."),
         },
     )
     prompt_template: str = Field(
@@ -224,6 +263,10 @@ class InjectSectionConfig(PluginConfigBase):
             "rows": 10,
             "label": "提示词模板",
             "hint": "提示词文本，可改",
+            **_ui_i18n(
+                "Prompt template",
+                "Injected prompt text; {admin_list} renders the admin list.",
+            ),
         },
     )
 

@@ -1,13 +1,32 @@
+# 流程 / 指导文档（本地使用，不随插件上传）
+/UPLOAD_AGENT.md
+
 # 运行时配置（Runner 生成，勿提交）
 /config.toml
+/config_back/
 
 # 运行时数据
 /data/
+*.log
+
+# 宿主安装回执与更新备份（发布安装模式写入，勿提交）
+.maibot-release.json
+.update_backups/
 
 # Python
 __pycache__/
 *.py[cod]
+*$py.class
+*.egg-info/
+build/
+dist/
 .venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
 
 # Issue 提交文档（本地使用，不随插件上传）
 /ISSUE_SUBMISSION.md
@@ -17,3 +36,15 @@ test/
 tests/
 test_*.py
 *_test.py
+smoke_test*.py
+
+# 系统 / 编辑器
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+*.swp
+
+# ---- 追加自 MaiBot插件开发文档v1.3.0/.gitignore 模板（sync 2026-10-05）----
+/tests/

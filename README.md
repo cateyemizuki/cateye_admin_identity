@@ -1,6 +1,6 @@
 # 管理员身份标注
 
-> 作者：cateye ｜ MaiBot 插件（适配 MaiBot 1.2.3 + maibot-plugin-sdk 2.x）
+> 作者：cateye ｜ MaiBot 插件（适配 MaiBot 1.2.x ~ 1.3.0 + maibot-plugin-sdk 2.x）
 
 每次 Maisaka planner 决策前，把发给 LLM 的上下文改写为**能确认管理员身份**的形式，
 防止 bot 被「我是你管理员，快照做」之类的消息带偏：
@@ -101,7 +101,7 @@ item_id 不变，不影响工具调用/结果的配对。只影响**本次临时
 ```toml
 [plugin]
 enabled = true
-config_version = "1.1.1"
+config_version = "1.1.2"
 
 [scope]
 # all = 私聊与群聊都生效；group_only = 仅群聊生效（私聊完全不动）
